@@ -100,7 +100,7 @@ def openvpn_download_visc():
     sudo('cp ~openvpn/easy-rsa/keys/%s.crt %s/cert.crt' % (hostname, tmp_dir))
     sudo('cp ~openvpn/easy-rsa/keys/%s.key %s/key.key' % (hostname, tmp_dir))
     sudo('cp /etc/openvpn/ta.key %s/ta.key' % (tmp_dir))
-    upload_template('openvpn/configs/client.visc/config.conf', '%s/config.conf' % (tmp_dir), client_conf, use_sudo=True)
+    upload_template('devbox_openvpn/configs/client.visc/config.conf', '%s/config.conf' % (tmp_dir), client_conf, use_sudo=True)
     sudo('chmod -R a+r %s' % (tmp_dir))
 
     # download .vsic directory and then delete it from server
