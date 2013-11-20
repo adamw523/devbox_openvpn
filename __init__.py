@@ -1,12 +1,27 @@
 from fabric.api import prompt
 from fabric.contrib.files import cd, exists, get, upload_template
-from fabric.operations import sudo
+from fabric.operations import run, sudo
 from fabric.state import env
 
 import ConfigParser
+import re
 
 config = ConfigParser.ConfigParser()
 config.read(['private/openvpn.cfg'])
+
+VALID_STATIC_OCTETS = [ [  1,  2], [  5,  6], [  9, 10], [ 13, 14], [ 17, 18],
+                        [ 21, 22], [ 25, 26], [ 29, 30], [ 33, 34], [ 37, 38],
+                        [ 41, 42], [ 45, 46], [ 49, 50], [ 53, 54], [ 57, 58],
+                        [ 61, 62], [ 65, 66], [ 69, 70], [ 73, 74], [ 77, 78],
+                        [ 81, 82], [ 85, 86], [ 89, 90], [ 93, 94], [ 97, 98],
+                        [101,102], [105,106], [109,110], [113,114], [117,118],
+                        [121,122], [125,126], [129,130], [133,134], [137,138],
+                        [141,142], [145,146], [149,150], [153,154], [157,158],
+                        [161,162], [165,166], [169,170], [173,174], [177,178],
+                        [181,182], [185,186], [189,190], [193,194], [197,198],
+                        [201,202], [205,206], [209,210], [213,214], [217,218],
+                        [221,222], [225,226], [229,230], [233,234], [237,238],
+                        [241,242], [245,246], [249,250], [253,254]]
 
 def openvpn_install():
     """
@@ -72,6 +87,26 @@ def openvpn_create_client():
     # creeate client keys
     with cd('~openvpn/easy-rsa/'):
         sudo('source vars; ./build-key %s' % hostname, user='openvpn')
+
+def openvpn_assign_static_ip():
+    """
+    Assign static IP address for a client
+    """
+
+    network = config.get('openvpn', 'network')
+    network_prompt = re.sub(r'(.*\.)(.+)\b', r'\1x', network)
+
+    hostname = prompt("Host name of the client:")
+
+    print "Valid IP endings:",
+    print ",".join([str(v[0]) for v in VALID_STATIC_OCTETS])
+    octet = prompt("Choose an ending octet from the above list (%s) :" % (network_prompt))
+
+    if not exists('/etc/openvpn/ccd'):
+        sudo('mkdir /etc/openvpn/ccd')
+
+    template_vars = {'oct1': octet, 'oct2': str(int(octet) + 1)}
+    upload_template('devbox_openvpn/configs/ccd_template', '/etc/openvpn/ccd/%s' % (hostname), template_vars, use_sudo=True)
 
 def openvpn_download_visc():
     """
