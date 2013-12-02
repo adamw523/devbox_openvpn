@@ -1,1 +1,1 @@
-ifconfig-push 10.2.3.%(oct1)s 10.2.3.%(oct2)s
+ifconfig-push %(network_pref)s%(oct1)s %(network_pref)s%(oct2)s

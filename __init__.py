@@ -1,9 +1,10 @@
 from fabric.api import prompt
-from fabric.contrib.files import cd, exists, get, upload_template
-from fabric.operations import run, sudo
+from fabric.contrib.files import cd, exists, get, sed, upload_template
+from fabric.operations import abort, run, sudo
 from fabric.state import env
 
 import ConfigParser
+import fabtools
 import re
 
 config = ConfigParser.ConfigParser()
@@ -27,9 +28,9 @@ def openvpn_install():
     """
     Install OpenVPN on server
     """
-    require.user('openvpn')
+    fabtools.require.user('openvpn')
 
-    fabtools.require.deb.packages(['openvpn', 'openvswitch-brcompat'])
+    fabtools.require.deb.packages(['openvpn', 'openvswitch-brcompat', 'ufw', 'libssl-dev', 'zip'])
     openvpn_vars = {
         "KEY_COUNTRY": config.get('openvpn', 'KEY_COUNTRY'),
         "KEY_PROVINCE": config.get('openvpn', 'KEY_PROVINCE'),
@@ -50,12 +51,13 @@ def openvpn_install():
         # copy over easy-rsa tools from oepnvpn examples
         sudo('cp -r /usr/share/doc/openvpn/examples/easy-rsa/2.0/* ~openvpn/easy-rsa/', user='openvpn')
         sudo('chown -R openvpn:openvpn ~openvpn/easy-rsa')
+        sed('~openvpn/easy-rsa/whichopensslcnf', 'openssl.cnf', 'openssl-1.0.0.cnf', use_sudo=True)
 
         # copy over server.conf file
-        upload_template('openvpn/configs/openvpn_server.conf', '/etc/openvpn/server.conf', openvpn_vars, use_sudo=True)
+        upload_template('devbox_openvpn/configs/openvpn_server.conf', '/etc/openvpn/server.conf', openvpn_vars, use_sudo=True)
 
         # coy over our variables
-        upload_template('openvpn/configs/openvpn_vars.sh', '/home/openvpn/easy-rsa/vars', openvpn_vars, use_sudo=True)
+        upload_template('devbox_openvpn/configs/openvpn_vars.sh', '/home/openvpn/easy-rsa/vars', openvpn_vars, use_sudo=True)
 
         with cd('~openvpn/easy-rsa'):
             # create keys
@@ -94,7 +96,8 @@ def openvpn_assign_static_ip():
     """
 
     network = config.get('openvpn', 'network')
-    network_prompt = re.sub(r'(.*\.)(.+)\b', r'\1x', network)
+    network_pref = re.sub(r'(.*\.)(.+)\b', r'\1', network)
+    network_prompt = network_pref + 'x'
 
     hostname = prompt("Host name of the client:")
 
@@ -105,7 +108,7 @@ def openvpn_assign_static_ip():
     if not exists('/etc/openvpn/ccd'):
         sudo('mkdir /etc/openvpn/ccd')
 
-    template_vars = {'oct1': octet, 'oct2': str(int(octet) + 1)}
+    template_vars = {'network_pref': network_pref, 'oct1': octet, 'oct2': str(int(octet) + 1)}
     upload_template('devbox_openvpn/configs/ccd_template', '/etc/openvpn/ccd/%s' % (hostname), template_vars, use_sudo=True)
 
 def openvpn_download_visc():
@@ -131,7 +134,6 @@ def openvpn_download_visc():
     # make tmp directory, copy required items into it
     sudo('mkdir %s' % (tmp_dir))
     sudo('cp /etc/openvpn/ca.crt %s/ca.crt' % (tmp_dir))
-    # sudo('cp /etc/openvpn/server.crt %s/server.crt' % (tmp_dir))
     sudo('cp ~openvpn/easy-rsa/keys/%s.crt %s/cert.crt' % (hostname, tmp_dir))
     sudo('cp ~openvpn/easy-rsa/keys/%s.key %s/key.key' % (hostname, tmp_dir))
     sudo('cp /etc/openvpn/ta.key %s/ta.key' % (tmp_dir))
@@ -141,3 +143,42 @@ def openvpn_download_visc():
     # download .vsic directory and then delete it from server
     get(tmp_dir, '.')
     sudo('rm -fR %s' % (tmp_dir))
+
+def openvpn_download_ovpn():
+    """
+    Download OpenVPN configuration files for OpenVPN
+    """
+    hostname = prompt("Host name of the client:")
+
+    if not exists('/home/openvpn/easy-rsa/keys/%s.crt' % (hostname), use_sudo=True):
+        abort('Create client keys first with: openvpn_create_client')
+
+    # set up a new directory to create our .visc configruation
+    tmp_dir = '/tmp/%s' % (hostname + '')
+    if exists(tmp_dir):
+        sudo('rm -fR %s' % (tmp_dir))
+
+    # vars for the configuration file
+    client_conf = {
+        "visc_name": hostname,
+        "server": env.hosts[0]
+    }
+
+    # make tmp directory, copy required items into it
+    sudo('mkdir %s' % (tmp_dir))
+    sudo('cp /etc/openvpn/ca.crt %s/ca.crt' % (tmp_dir))
+    sudo('cp ~openvpn/easy-rsa/keys/%s.crt %s/cert.crt' % (hostname, tmp_dir))
+    sudo('cp ~openvpn/easy-rsa/keys/%s.key %s/key.key' % (hostname, tmp_dir))
+    sudo('cp /etc/openvpn/ta.key %s/ta.key' % (tmp_dir))
+    upload_template('devbox_openvpn/configs/client.ovpn', '%s/config.ovpn' % (tmp_dir), client_conf, use_sudo=True)
+    sudo('chmod -R a+r %s' % (tmp_dir))
+
+    # zip up the directory
+    with cd('/tmp/'):
+        sudo('zip -r %s.zip %s' % (hostname, hostname))
+
+    # download .vsic directory and then delete it from server
+    get('/tmp/%s.zip' % (hostname))
+    sudo('rm -fR %s' % (tmp_dir))
+    sudo('rm /tmp/%s.zip' % (hostname))
+
